@@ -366,6 +366,7 @@ async fn handle_client_message(
 
             let state = game.do_action(action)?;
             store_game(&game, conn).await?;
+            synchronize_time(sender, ws).await;
             broadcast_state(room, &state, ws).await;
         }
         ClientMessage::Rollback { key } => {
@@ -383,6 +384,7 @@ async fn handle_client_message(
 
             let state = game.rollback()?;
             store_game(&game, conn).await?;
+            synchronize_time(sender, ws).await;
             broadcast_state(room, &state, ws).await;
         }
     }
