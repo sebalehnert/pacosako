@@ -4,12 +4,9 @@ version = "0.1.0"
 authors = ["Rolf Kreibaum <rolf.kreibaum@posteo.de>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
-rocket = "0.4.6"
 serde = { version = "1.0", features = ["derive"] }
-pbkdf2 = "0.6.0"
+pbkdf2 = "0.6.0" # New 0.7 api is more complicated
 serde_json = "1.0"
 pacosako-rust = { path = "../lib" }
 rand = "0.7.3"
@@ -17,17 +14,27 @@ ws = "0.9.1"
 uuid = "0.8.1"
 chrono = { version = "0.4", features = ["serde"] }
 time =  "0.1.43"
-mio = "0.6.14"
+mio = "0.7"
 crossbeam-channel = "0.5.0"
-simplelog = "0.8"
+simplelog = "0.10"
 log = "0.4"
 async-std = { version = "1.7.0", features = [ "attributes" ] }
-sqlx = { version = "0.4.0-beta.1", features = ["sqlite", "runtime-async-std-rustls" ] }
-async-tungstenite = { version = "0.10.0", features = ["async-std-runtime"] }
-futures = "0.3.8"
+sqlx = { version = "0.5", features = ["sqlite", "runtime-async-std-rustls" ] }
+async-tungstenite = { version = "0.13", features = ["async-std-runtime"] }
+futures = "0.3"
 anyhow = "1.0"
+thiserror = "1.0"
+async-channel = "1.6"
+
+[dependencies.rocket]
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
+default-features = false
+features = ["secrets"]
+
 
 [dependencies.rocket_contrib]
-version = "0.4.6"
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
 default-features = false
 features = ["json", "serve"]

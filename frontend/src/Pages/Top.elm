@@ -69,7 +69,7 @@ load shared model =
         | login = shared.user
         , language = shared.language
       }
-    , refreshRecentGames
+    , Cmd.none
     )
 
 
@@ -162,7 +162,7 @@ intoCustomSpeedSetting : SpeedSetting -> Maybe CustomSpeedSetting
 intoCustomSpeedSetting selection =
     case selection of
         Lightspeed ->
-            Just <| CustomSpeedSetting 1 0 5
+            Just <| CustomSpeedSetting 1 0 10
 
         Blitz ->
             Just <| CustomSpeedSetting 4 0 5
@@ -445,13 +445,13 @@ timeLimitInputCustom model =
             t model.language i18nChoosenTimeLimit
     in
     Element.wrappedRow []
-        [ Input.text []
+        [ Input.text [ width (Element.px 60) ]
             { onChange = SetRawMinutes, text = model.rawMinutes, placeholder = Nothing, label = Input.labelHidden "Minutes" }
         , Element.text m
-        , Input.text []
+        , Input.text [ width (Element.px 50) ]
             { onChange = SetRawSeconds, text = model.rawSeconds, placeholder = Nothing, label = Input.labelHidden "Seconds" }
         , Element.text s
-        , Input.text []
+        , Input.text [ width (Element.px 50) ]
             { onChange = SetRawIncrement, text = model.rawIncrement, placeholder = Nothing, label = Input.labelHidden "Increment" }
         , Element.text i
         ]

@@ -73,12 +73,13 @@ observer.observe(document.body, { childList: true, subtree: true });
 let localStorageData = JSON.parse(localStorage.getItem('localStorage'));
 
 // Pass the window size to elm on init. This way we already know it on startup.
-let windowSize = { width: window.innerWidth, height: window.innerHeight };
+let windowSize = { "width": window.innerWidth, "height": window.innerHeight };
 var app = Elm.Main.init({
     node: document.getElementById("elm"),
     flags: {
         "windowSize": windowSize,
-        "localStorage": localStorageData
+        "localStorage": localStorageData,
+        "now": Date.now()
     },
 });
 
@@ -251,7 +252,9 @@ class WebsocketWrapper {
         let protocol = window.location.protocol === "https:" ? "wss" : "ws"
         let hostname = window.location.hostname
         let websocket_url = `${protocol}://${hostname}/websocket`
-        if (!hostname.includes("localhost")) {
+        if (!hostname.includes("localhost")
+            && !hostname.includes("127.0.0.1")
+            && !hostname.includes("0.0.0.0")) {
             return this.try_connect(websocket_url)
         } else {
             return Promise.resolve(undefined)

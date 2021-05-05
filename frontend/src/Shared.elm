@@ -12,6 +12,8 @@ module Shared exposing
 import Api.Backend
 import Api.LocalStorage as LocalStorage exposing (Permission(..))
 import Api.Ports
+import Browser.Dom
+import Browser.Events
 import Browser.Navigation exposing (Key)
 import Custom.Element exposing (icon)
 import Element exposing (..)
@@ -26,6 +28,7 @@ import Json.Encode exposing (Value)
 import Spa.Document exposing (Document)
 import Spa.Generated.Route as Route exposing (Route)
 import Svg.Custom
+import Time exposing (Posix)
 import Url exposing (Url)
 
 
@@ -48,6 +51,7 @@ type alias Model =
     -- people sharing a game with you.
     , username : String
     , permissions : List LocalStorage.Permission
+    , now : Posix
     }
 
 
@@ -64,6 +68,7 @@ init flags url key =
       , language = ls.data.language
       , username = ls.data.username
       , permissions = ls.permissions
+      , now = parseNow flags
       }
     , Api.Backend.getCurrentLogin HttpError
         (Maybe.map LoginSuccess >> Maybe.withDefault LogoutSuccess)
@@ -78,9 +83,22 @@ parseWindowSize value =
 
 sizeDecoder : Decoder ( Int, Int )
 sizeDecoder =
-    Decode.map2 (\x y -> ( x, y ))
-        (Decode.field "width" Decode.int)
-        (Decode.field "height" Decode.int)
+    Decode.field "windowSize"
+        (Decode.map2 (\x y -> ( x, y ))
+            (Decode.field "width" Decode.int)
+            (Decode.field "height" Decode.int)
+        )
+
+
+parseNow : Value -> Posix
+parseNow value =
+    let
+        nowDecoder =
+            Decode.map Time.millisToPosix
+                (Decode.field "now" Decode.int)
+    in
+    Decode.decodeValue nowDecoder value
+        |> Result.withDefault (Time.millisToPosix 0)
 
 
 
@@ -94,6 +112,8 @@ type Msg
     | LogoutSuccess
     | UserHidesGamesArePublicHint
     | SetLanguage Language
+    | WindowResize Int Int
+    | UpdateNow Posix
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -116,6 +136,12 @@ update msg model =
 
         SetLanguage lang ->
             setLanguage lang model
+
+        WindowResize width height ->
+            ( { model | windowSize = ( width, height ) }, Cmd.none )
+
+        UpdateNow now ->
+            ( { model | now = now }, Cmd.none )
 
 
 setLanguage : Language -> Model -> ( Model, Cmd Msg )
@@ -146,7 +172,11 @@ triggerSaveLocalStorage model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    LocalStorage.subscribeSave TriggerSaveLocalStorage
+    Sub.batch
+        [ LocalStorage.subscribeSave TriggerSaveLocalStorage
+        , Browser.Events.onResize WindowResize
+        , Time.every 1000 UpdateNow
+        ]
 
 
 

@@ -1,46 +1,96 @@
+/// This module implements a timeout functionality. You can register timeouts on
+/// a string key and will be notified when it runs out.
 use chrono::{DateTime, Duration, Utc};
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::thread;
-/// This module implements a timeout functionality. You can register timeouts on
-/// a string key and will be notified when it runs out.
+
+type ChannelError<T> = crossbeam_channel::SendError<(T, DateTime<Utc>)>;
+
+pub trait TimeoutOutMsg<T>: Sized + Send + Sync + 'static {
+    fn from_ws_message(data: T, timestamp: DateTime<Utc>) -> Option<Self>;
+}
+
+/// Creates a timeout thread which works kind of like a channel, but all the
+/// messages you put in get delayed. (Note that this channel is sync!)
+pub fn run_timeout_thread<T>(
+    to_logic: async_channel::Sender<impl TimeoutOutMsg<T>>,
+) -> async_channel::Sender<(T, DateTime<Utc>)>
+where
+    T: Send + Sync + Eq + Hash + Clone + 'static,
+{
+    // We have a pair of channels and then do some logic inbetween.
+    let (to_timeout, input) = unbounded();
+    let (output, from_timeout) = unbounded();
+
+    thread::spawn(move || {
+        let data = Timeout {
+            input,
+            output,
+            timeouts: HashMap::new(),
+        };
+        data.run()
+    });
+
+    let (result, to_timeout_async) = async_channel::unbounded();
+
+    std::thread::spawn(move || async_std::task::block_on(read_async(to_timeout_async, to_timeout)));
+    std::thread::spawn(move || async_std::task::block_on(forward_async(from_timeout, to_logic)));
+
+    result
+}
+
+/// Ideally I should rewrite this connector to be async, then I can skip this
+/// forwarding thread. But for now it is easier to forward then to convert this
+/// into async properly.
+async fn read_async<T>(
+    to_timeout_async: async_channel::Receiver<(T, DateTime<Utc>)>,
+    to_timeout: Sender<(T, DateTime<Utc>)>,
+) -> () {
+    while let Ok(pair) = to_timeout_async.recv().await {
+        if to_timeout.send(pair).is_err() {
+            break;
+        }
+    }
+}
+
+/// Ideally I should rewrite this connector to be async, then I can skip this
+/// forwarding thread. But for now it is easier to forward then to convert this
+/// into async properly.
+async fn forward_async<T>(
+    from_timeout: Receiver<(T, DateTime<Utc>)>,
+    to_logic: async_channel::Sender<impl TimeoutOutMsg<T>>,
+) -> () {
+    while let Ok((data, timestamp)) = from_timeout.recv() {
+        if let Some(msg) = TimeoutOutMsg::from_ws_message(data, timestamp) {
+            if to_logic.send(msg).await.is_err() {
+                break;
+            }
+        }
+    }
+}
 
 /// Timeout manager
-pub struct Timeout {
-    receiver: Receiver<(String, DateTime<Utc>)>,
-    callback: Box<dyn Callback>,
-    timeouts: HashMap<String, DateTime<Utc>>,
+struct Timeout<T> {
+    input: Receiver<(T, DateTime<Utc>)>,
+    output: Sender<(T, DateTime<Utc>)>,
+    timeouts: HashMap<T, DateTime<Utc>>,
 }
 
 pub trait Callback: Send {
     fn on_timeout(&self, key: String, now: DateTime<Utc>);
 }
 
-enum Instruction {
-    Schedule { key: String, when: DateTime<Utc> },
+enum Instruction<T> {
+    Schedule { key: T, when: DateTime<Utc> },
     TriggerCallback,
     Shutdown,
 }
 
-impl Timeout {
-    /// Create a new timeout thread running in the background.
-    /// Use the returned sender to request timeout callbacks.
-    pub fn spawn(callback: Box<dyn Callback>) -> Sender<(String, DateTime<Utc>)> {
-        let (sender, receiver) = unbounded();
-
-        let data = Timeout {
-            receiver,
-            callback,
-            timeouts: HashMap::new(),
-        };
-
-        thread::spawn(move || data.run());
-
-        sender
-    }
-
+impl<T: Eq + Hash + Clone> Timeout<T> {
     /// Runs inside the new thread already
-    fn run(mut self) {
+    fn run(mut self) -> Result<(), ChannelError<T>> {
         loop {
             let wakeup_time = self.determine_wakeup_time();
 
@@ -49,10 +99,10 @@ impl Timeout {
                     self.schedule(key, when);
                 }
                 Instruction::TriggerCallback => {
-                    self.trigger_callbacks();
+                    self.trigger_callbacks()?;
                 }
                 Instruction::Shutdown => {
-                    return;
+                    return Ok(());
                 }
             }
         }
@@ -63,7 +113,7 @@ impl Timeout {
         self.timeouts.values().min().cloned()
     }
 
-    fn sleep(&mut self, wakeup_time: Option<DateTime<Utc>>) -> Instruction {
+    fn sleep(&mut self, wakeup_time: Option<DateTime<Utc>>) -> Instruction<T> {
         // Do we have a timer we are waiting for?
         if let Some(wakeup_time) = wakeup_time {
             self.sleep_for(wakeup_time - Utc::now())
@@ -74,11 +124,11 @@ impl Timeout {
 
     /// Call this one to sleep when a timeout is scheduled. The duration is the
     /// amount of time the thread should listen for messages before handing back controll.
-    fn sleep_for(&self, duration: Duration) -> Instruction {
+    fn sleep_for(&self, duration: Duration) -> Instruction<T> {
         let duration: Result<std::time::Duration, time::OutOfRangeError> = duration.to_std();
 
         match duration {
-            Ok(duration) => match self.receiver.recv_timeout(duration) {
+            Ok(duration) => match self.input.recv_timeout(duration) {
                 Ok((key, when)) => Instruction::Schedule { key, when },
                 Err(error) => {
                     if error.is_timeout() {
@@ -99,8 +149,8 @@ impl Timeout {
     }
 
     /// Call this one to sleep if no timeout is scheduled.
-    fn sleep_indefinitely(&self) -> Instruction {
-        match self.receiver.recv() {
+    fn sleep_indefinitely(&self) -> Instruction<T> {
+        match self.input.recv() {
             Ok((key, when)) => Instruction::Schedule { key, when },
             Err(_) => Instruction::Shutdown,
         }
@@ -108,11 +158,11 @@ impl Timeout {
 
     /// Figure out which callback are up and trigger them.
     /// This also removes them from the map.
-    fn trigger_callbacks(&mut self) {
+    fn trigger_callbacks(&mut self) -> Result<(), ChannelError<T>> {
         let now = Utc::now();
 
         // Find out which keys timed out
-        let timed_out: Vec<String> = self
+        let timed_out: Vec<T> = self
             .timeouts
             .iter()
             .filter(|&(_, &v)| v < now)
@@ -126,11 +176,12 @@ impl Timeout {
 
         // Trigger callbacks
         for key in timed_out {
-            self.callback.on_timeout(key, now);
+            self.output.send((key.clone(), now))?;
         }
+        Ok(())
     }
 
-    fn schedule(&mut self, key: String, when: DateTime<Utc>) {
+    fn schedule(&mut self, key: T, when: DateTime<Utc>) {
         match self.timeouts.entry(key) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 // Check if the new timeout is earlier, replace the entry in that case.

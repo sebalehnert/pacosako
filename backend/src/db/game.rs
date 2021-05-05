@@ -1,104 +1,113 @@
-use sqlx::{pool::PoolConnection, Sqlite};
+use crate::db::Connection;
+use crate::{sync_match::SyncronizedMatch, ServerError};
 
-use crate::{sync_match::SyncronizedMatch, timer::Timer};
+/// Stores the game in the database as a new entry and updates the id
+pub async fn insert(game: &mut SyncronizedMatch, conn: &mut Connection) -> Result<(), ServerError> {
+    let action_history = serde_json::to_string(&game.actions)?;
 
-pub type Conn = PoolConnection<Sqlite>;
+    let timer = if let Some(ref timer) = game.timer {
+        Some(serde_json::to_string(timer)?)
+    } else {
+        None
+    };
+
+    let id = sqlx::query!(
+        "insert into game (action_history, timer) values (?, ?)",
+        action_history,
+        timer
+    )
+    .execute(conn)
+    .await?
+    .last_insert_rowid();
+
+    game.key = format!("{}", id);
+
+    Ok(())
+}
+
+/// Updates the game in the database.
+pub async fn update(game: &SyncronizedMatch, conn: &mut Connection) -> Result<(), ServerError> {
+    let id: i64 = game.key.parse()?;
+
+    let action_history = serde_json::to_string(&game.actions)?;
+
+    let timer = if let Some(ref timer) = game.timer {
+        Some(serde_json::to_string(timer)?)
+    } else {
+        None
+    };
+
+    sqlx::query!(
+        r"update game 
+        set action_history = ?, timer = ?
+        where id = ?",
+        action_history,
+        timer,
+        id
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
+pub async fn select(
+    id: i64,
+    conn: &mut Connection,
+) -> Result<Option<SyncronizedMatch>, ServerError> {
+    let raw_game = sqlx::query_as!(
+        RawGame,
+        "select id, action_history, timer from game where id = ?",
+        id
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    if let Some(raw_game) = raw_game {
+        Ok(Some(raw_game.to_match()?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn latest(conn: &mut Connection) -> Result<Vec<SyncronizedMatch>, ServerError> {
+    let raw_games = sqlx::query_as!(
+        RawGame,
+        r"select id, action_history, timer from game
+        order by created desc
+        limit 5"
+    )
+    .fetch_all(conn)
+    .await?;
+
+    let mut result = Vec::with_capacity(raw_games.len());
+    for raw_game in raw_games {
+        result.push(raw_game.to_match()?);
+    }
+
+    Ok(result)
+}
 
 // Database representation of a sync_match::SyncronizedMatch
 // We don't fully normalize the data, instead we just dump JSON into the db.
-pub struct RawGame {
-    pub id: i64,
-    pub action_history: String,
-    pub timer: Option<String>,
+struct RawGame {
+    id: i64,
+    action_history: String,
+    timer: Option<String>,
 }
 
-/// Helper trait for simple DB storage. You would do:
-///
-/// impl StoreAs<RawGame> for SyncronizedMatch { .. }
-pub trait StoreAs<T>: Sized {
-    fn store(&self) -> Result<T, anyhow::Error>;
-    fn load(stored: &T) -> Result<Self, anyhow::Error>;
-}
-
-impl StoreAs<RawGame> for SyncronizedMatch {
-    fn store(&self) -> Result<RawGame, anyhow::Error> {
+impl RawGame {
+    fn to_match(self) -> Result<SyncronizedMatch, ServerError> {
         let timer = if let Some(ref timer) = self.timer {
-            Some(serde_json::to_string(timer)?)
-        } else {
-            None
-        };
-
-        Ok(RawGame {
-            id: self.key.parse()?,
-            action_history: serde_json::to_string(&self.actions)?,
-            timer,
-        })
-    }
-
-    fn load(stored: &RawGame) -> Result<Self, anyhow::Error> {
-        let timer = if let Some(ref timer) = stored.timer {
             Some(serde_json::from_str(timer)?)
         } else {
             None
         };
 
         Ok(SyncronizedMatch {
-            key: format!("{}", stored.id),
-            actions: serde_json::from_str(&stored.action_history)?,
+            key: format!("{}", self.id),
+            actions: serde_json::from_str(&self.action_history)?,
             timer,
         })
-    }
-}
-
-impl RawGame {
-    /// Reads a RawGame from the database given a known id.
-    pub async fn select(id: i64, conn: &mut Conn) -> Result<Option<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            RawGame,
-            "select id, action_history, timer from game where id = ?",
-            id
-        )
-        .fetch_optional(conn)
-        .await
-    }
-
-    /// Writes a RawGame to the database into a new record and overrides the id.
-    pub async fn insert(&mut self, conn: &mut Conn) -> Result<&mut Self, sqlx::Error> {
-        self.id = sqlx::query!(
-            "insert into game (action_history, timer) values (?, ?)",
-            self.action_history,
-            self.timer
-        )
-        .execute(conn)
-        .await?
-        .last_insert_rowid();
-
-        Ok(self)
-    }
-
-    pub async fn update(&self, conn: &mut Conn) -> Result<(), sqlx::Error> {
-        sqlx::query!(
-            r"update game 
-            set action_history = ?, timer = ?
-            where id = ?",
-            self.action_history,
-            self.timer,
-            self.id
-        )
-        .execute(conn)
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn latest(conn: &mut Conn) -> Result<Vec<Self>, sqlx::Error> {
-        sqlx::query_as!(
-            RawGame,
-            r"select id, action_history, timer from game 
-            order by created desc 
-            limit 5"
-        )
-        .fetch_all(conn)
-        .await
     }
 }
