@@ -21,6 +21,7 @@ use serde_json::ser::to_string;
 use std::{
     collections::{HashMap, HashSet},
     net::SocketAddr,
+    time::{SystemTime},
 };
 
 use self::timeout_connector::TimeoutOutMsg;
@@ -192,6 +193,7 @@ pub enum ServerMessage {
         key: String,
         state: CurrentMatchState,
     },
+    SendAt(u64), 
     Error(String),
 }
 
@@ -296,6 +298,13 @@ async fn progress_the_timer(
     }
 }
 
+async fn synchronize_time(sender: SocketAddr, ws: &PeerMap) {
+    let current_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
+    .expect("Invalid time comparison");
+    let time_response = ServerMessage::SendAt(current_time.as_secs());
+    send_msg(time_response, &sender, ws).await.expect("Failed to synchronize clocks");
+}
+
 async fn handle_client_message(
     msg: ClientMessage,
     sender: SocketAddr,
@@ -333,8 +342,8 @@ async fn handle_client_message(
             }
 
             let response = ServerMessage::MatchConnectionSuccess { key, state };
-
             send_msg(response, &sender, ws).await?;
+            synchronize_time(sender, ws).await;
         }
         ClientMessage::DoAction { key, action } => {
             let room = server_state.room(&key, sender);
