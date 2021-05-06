@@ -108,7 +108,7 @@ type ServerMessage
     = TechnicalError String
     | NewMatchState CurrentMatchState
     | MatchConnectionSuccess { key : String, state : CurrentMatchState }
-
+    | SendAt Int
 
 decodeServerMessage : Decoder ServerMessage
 decodeServerMessage =
@@ -120,6 +120,8 @@ decodeServerMessage =
         , Decode.map2 (\key matchState -> MatchConnectionSuccess { key = key, state = matchState })
             (Decode.at [ "MatchConnectionSuccess", "key" ] Decode.string)
             (Decode.at [ "MatchConnectionSuccess", "state" ] decodeMatchState)
+        , Decode.map SendAt
+            (Decode.at [ "SendAt" ] Decode.int)
         ]
 
 
