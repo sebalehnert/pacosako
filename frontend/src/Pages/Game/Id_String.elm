@@ -498,7 +498,8 @@ toUnixTimeSecs : Int -> Int
 toUnixTimeSecs unixMillis = round ((toFloat unixMillis) / 1000)
 
 updatePing : Int -> Model -> ( Model, Cmd Msg )
-updatePing data model = let _ = Debug.log "ping is " (toUnixTimeSecs (Time.posixToMillis model.now)) - data
+-- updatePing data model = let _ = Debug.log "ping is " (toUnixTimeSecs (Time.posixToMillis model.now)) - data
+updatePing data model = let _ = Debug.log "ping is " ((toUnixTimeSecs (Time.posixToMillis model.now)) - data)
   in ({ model | ping = 
   (toUnixTimeSecs (Time.posixToMillis model.now)) - data }, Cmd.none)
 
