@@ -498,7 +498,8 @@ toUnixTimeSecs : Int -> Int
 toUnixTimeSecs unixMillis = round ((toFloat unixMillis) / 1000)
 
 updatePing : Int -> Model -> ( Model, Cmd Msg )
-updatePing data model = let _ = Ports.logToConsole "sideEffect" in ({ model | ping = 
+updatePing data model = let _ = Debug.log "ping is " (toUnixTimeSecs (Time.posixToMillis model.now)) - data
+  in ({ model | ping = 
   (toUnixTimeSecs (Time.posixToMillis model.now)) - data }, Cmd.none)
 
 -- updatePing data model = ( model, Cmd.none )
@@ -553,7 +554,8 @@ updateWebsocket serverMessage model =
             updateMatchConnectionSuccess data model
 
         -- Api.Websocket.SendAt unixTime -> let _ = Ports.logToConsole "asdew" in updatePing unixTime model
-        Api.Websocket.SendAt unixTime -> let _ = Ports.logToConsole "yxcv" in (model, Ports.logToConsole "unixTime")
+        -- Api.Websocket.SendAt unixTime -> let _ = Debug.log "aaa" "bbb" in (model, Ports.logToConsole "unixTime")
+        Api.Websocket.SendAt unixTime -> let _ = Debug.log "start " "bbb" in (updatePing unixTime model)
 
 save : Model -> Shared.Model -> Shared.Model
 save _ shared =
@@ -1109,7 +1111,7 @@ i18nCopyToClipboard =
 i18nRestartMove : I18nToken String
 i18nRestartMove =
     I18nToken
-        { english = "Restart asdf move"
+        { english = "Restart qwer move"
         , dutch = "Herstart verplaatsen"
         , esperanto = "Rekomenci movon"
         }
