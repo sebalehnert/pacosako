@@ -40,6 +40,7 @@ import Time exposing (Posix)
 import Timer
 import Url
 import Url.Parser exposing (query)
+import Time exposing (posixToMillis)
 
 
 page : Page Params Model Msg
@@ -74,6 +75,7 @@ type alias Model =
     , inputMode : Maybe CastingDeco.InputMode
     , rotation : BoardRotation
     , now : Posix
+    , ping : Int
     , lang : Language
     , whiteName : String
     , blackName : String
@@ -102,6 +104,7 @@ init shared { params, query } =
       , inputMode = Nothing
       , rotation = WhiteBottom
       , now = shared.now
+      , ping = 0
       , lang = shared.language
       , whiteName = ""
       , blackName = ""
@@ -491,6 +494,14 @@ updateMatchConnectionSuccess data model =
     { model | subscription = Just data.key }
         |> updateCurrentMatchState data.state
 
+toUnixTimeSecs : Int -> Int
+toUnixTimeSecs unixMillis = round ((toFloat unixMillis) / 1000)
+
+updatePing : Int -> Model -> ( Model, Cmd Msg )
+updatePing data model = let a = Ports.logToConsole "sideEffect" in ({ model | ping = 
+  (toUnixTimeSecs (Time.posixToMillis model.now)) - data }, Cmd.none)
+
+-- updatePing data model = ( model, Cmd.none )
 
 {-| Given an old and a new match state, this returns the actions that need to
 be taken to transform the old state into the new state. Returns Nothing if the
@@ -541,6 +552,8 @@ updateWebsocket serverMessage model =
         Api.Websocket.MatchConnectionSuccess data ->
             updateMatchConnectionSuccess data model
 
+        Api.Websocket.SendAt unixTime -> updatePing unixTime model
+        -- Api.Websocket.SendAt unixTime -> (model, Ports.logToConsole "unixTime")
 
 save : Model -> Shared.Model -> Shared.Model
 save _ shared =
@@ -1096,7 +1109,7 @@ i18nCopyToClipboard =
 i18nRestartMove : I18nToken String
 i18nRestartMove =
     I18nToken
-        { english = "Restart move"
+        { english = "Restart qwer move"
         , dutch = "Herstart verplaatsen"
         , esperanto = "Rekomenci movon"
         }
